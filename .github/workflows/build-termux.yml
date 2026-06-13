@@ -26,7 +26,7 @@ jobs:
     # ۳. پچ کردن داینامیک متون فارسی (حل باگ چسبندگی حروف)
     - name: Patch Persian Text Support (RTL/Shaping)
       run: |
-        echo "Applying Persian RTL & Shaping patches to Terminal Emulator dynamically..."
+        echo "Applying Persian RTL & Shaping patches to Terminal Emulator..."
         
         # پیدا کردن سراسری فایل رندر و تزریق فلگ RTL
         find . -type f -name "TerminalEmulator.java" -exec sed -i 's/boolean mouseTracking/boolean mouseTracking; public boolean isRtl = true/g' {} +
@@ -43,7 +43,7 @@ jobs:
         # دریافت اطلاعات کامل آخرین ریلیز جی‌سون از API گیت‌هاب
         curl -s https://api.github.com/repos/ggerganov/llama.cpp/releases/latest > release.json
         
-        # تلاش اول: پیدا کردن پکیج‌های اندرویدی حاوی باینری‌های کامپایل شده (مانند توزیع‌های بن یا ndk)
+        # تلاش اول: پیدا کردن پکیج‌های اندرویدی حاوی باینری‌های کامپایل شده
         LLAMA_RELEASE_URL=$(cat release.json | grep "browser_download_url" | grep -i -E "android|bionic" | grep -i "arm64" | head -n 1 | cut -d '"' -f 4)
         
         # تلاش دوم (بک‌آپ): اگر پکیج بومی اندروید نبود، نسخه ساخت لینوکس برای پردازنده‌های aarch64 (arm64) را بردار
@@ -52,15 +52,13 @@ jobs:
           LLAMA_RELEASE_URL=$(cat release.json | grep "browser_download_url" | grep -i -E "linux|bin" | grep -i -E "arm64|aarch64" | grep -v "vulkan" | head -n 1 | cut -d '"' -f 4)
         fi
         
-        # چاپ لینک پیدا شده در محیط لاگ جهت عیب‌یابی راحت‌تر شما
         echo "Target URL: $LLAMA_RELEASE_URL"
         
         if [ -z "$LLAMA_RELEASE_URL" ]; then
-          echo "❌ خطا: متاسفانه هیچ باینری آماده‌ای برای معماری arm64 پیدا نشد. یک فایل فیک موقت می‌سازیم تا فرآیند بیلد کل ترموکس خراب نشود."
+          echo "⚠️ باینری آماده پیدا نشد. یک اسکریپت فیک موقت می‌سازیم تا فرآیند بیلد خراب نشود."
           mkdir -p app/src/main/assets/bin
           echo -e '#!/bin/sh\necho "llama.cpp was not bundled correctly during build. Please install manually."' > app/src/main/assets/bin/llama-cli
         else
-          # دانلود و باز کردن پکیج زیپ یا تاربال بر اساس پسوند فایل یافته شده
           mkdir -p llama_bin
           if [[ "$LLAMA_RELEASE_URL" == *.zip ]]; then
             curl -L "$LLAMA_RELEASE_URL" -o llama_bin/llama.zip
@@ -70,26 +68,29 @@ jobs:
             tar -xvf llama_bin/llama.tar.gz -C llama_bin/
           fi
           
-          # استخراج باینری اصلی از داخل ساختار فولدری و کپی به پکیج نهایی
           mkdir -p app/src/main/assets/bin
           find llama_bin/ -type f -name "llama-cli" -exec cp {} app/src/main/assets/bin/llama-cli \;
           find llama_bin/ -type f -name "main" -exec cp {} app/src/main/assets/bin/llama-cli \;
         fi
         
-        # مطمئن شدن از دسترسی اجرایی فایل اگسکیوتیبل
         if [ -f "app/src/main/assets/bin/llama-cli" ]; then
            chmod +x app/src/main/assets/bin/llama-cli
            echo "✅ llama.cpp successfully embedded!"
         fi
 
-    # ۵. تغییر پکیج نیم و تزریق کدهای لودینگ روت مجازی و محیط زبان فارسی
+    # ۵. تغییر پکیج نیم به شکل ایمن و تزریق کدهای لودینگ روت مجازی و محیط زبان فارسی
     - name: Modify Package Name & Inject Auto-Superuser PRoot
       run: |
-        echo "Changing Application ID to avoid conflicts with original Termux..."
-        find . -type f -name "build.gradle" -exec sed -i 's/com.termux/com.mohammad.shell/g' {} +
+        echo "Changing Application ID in gradle to avoid conflicts safely..."
+        # تغییر آی‌دی برنامه فقط در ساختار تعریف هویت پروژه و نه آدرس‌های URL مخزن گیت‌هاب ترموکس
+        sed -i 's/applicationId "com.termux"/applicationId "com.mohammad.shell"/g' app/build.gradle
+        sed -i 's/com.termux.app/com.mohammad.shell.app/g' app/build.gradle 2>/dev/null || true
         
-        echo "Modifying Java Package references dynamically..."
-        find . -type f -name "*.java" -exec sed -i 's/com.termux/com.mohammad.shell/g' {} +
+        echo "Modifying Java/Kotlin package declarations..."
+        # تغییر پکیج‌ها فقط درون کدهای سورس جاوا
+        find app/src/main/java -type f -name "*.java" -exec sed -i 's/com.termux/com.mohammad.shell/g' {} +
+        find terminal/src/main/java -type f -name "*.java" -exec sed -i 's/com.termux/com.mohammad.shell/g' {} + 2>/dev/null || true
+        find termux-shared/src/main/java -type f -name "*.java" -exec sed -i 's/com.termux/com.mohammad.shell/g' {} + 2>/dev/null || true
         
         echo "Injecting custom proot loop and Persian env into bashrc..."
         mkdir -p app/src/main/assets
@@ -104,7 +105,7 @@ jobs:
         if [ -z "$MY_CUSTOM_ROOT_ACTIVE" ]; then
             export MY_CUSTOM_ROOT_ACTIVE=1
             
-            # پیکربندی لوکیشن متن برای پایداری زبان و یونیکد فارسی
+            # تنظیم لوکیشن متن برای پایداری زبان و یونیکد فارسی
             export LANG=fa_IR.UTF-8
             export LC_ALL=fa_IR.UTF-8
             
@@ -141,8 +142,8 @@ jobs:
         name: "Termux Mohammad Edition #${{ github.run_number }}"
         body: |
           مجموعه ویژگی‌های این نسخه دست‌ساز اختصاصی شما:
-          - کاملاً مستقل با نام بسته `com.mohammad.shell` (عدم تداخل با نسخه رسمی ترموکس)
-          - مجهز به سوپریوزر مجازی `PRoot -0` جهت جعل هویت روت و آدرس‌های دایرکتوری استاندارد لینوکس
+          - کاملاً مستقل با نام بسته `com.mohammad.shell` (بدون تداخل با نسخه رسمی و ارور Host URL اصلاح شده)
+          - مجهز به سوپریوزر مجازی `PRoot -0` جهت جعل هویت روت و دسترسی به آدرس‌های دایرکتوری لینوکس
           - پچ سراسری رفع باگ عدم چسبندگی و رندر اشتباه حروف فارسی در محیط شبیه‌ساز ترمینال
           - دارای هوش مصنوعی بومی `llama.cpp` تزریق شده به صورت تعبیه‌شده (Embedded) در فولدربندی پایه اپ
         draft: false
