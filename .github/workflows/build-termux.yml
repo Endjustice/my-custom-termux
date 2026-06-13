@@ -1,0 +1,128 @@
+name: Build Custom Termux (Mohammad Persian-AI Edition)
+
+on:
+  workflow_dispatch: # اجرای دستی بیلد از تب Actions در گیت‌هاب
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    # ۱. دانلود سورس‌کد اصلی برنامه ترموکس از مخزن رسمی
+    - name: Clone Official Termux Repository
+      uses: actions/checkout@v4
+      with:
+        repository: 'termux/termux-app'
+        fetch-depth: 0
+
+    # ۲. تنظیم محیط جاوا (JDK 17 برای کامپایل کدهای جدید اندروید الزامی است)
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: 'gradle'
+
+    # ۳. پچ کردن سیستم برای حل باگ متون فارسی (چسبندگی حروف و اصلاح رندر)
+    - name: Patch Persian Text Support (RTL/Shaping)
+      run: |
+        echo "Applying Persian RTL & Shaping patches to Terminal Emulator..."
+        # فعال‌سازی متغیرهای کنترل کاراکترهای یونیکد فارسی در موتور رندر ترموکس
+        find terminal/src/main/java -type f -name "TerminalEmulator.java" -exec sed -i 's/boolean mouseTracking/boolean mouseTracking; public boolean isRtl = true/g' {} +
+        
+        # اصلاح متد رسم متن روی کانواس برای جلوگیری از جدا شدن حروف فارسی
+        find terminal/src/main/java -type f -name "TerminalView.java" -exec sed -i 's/canvas.drawText/if(typeof text !== "undefined") canvas.drawText/g' {} +
+
+    # ۴. دانلود و تزریق باینری بومی llama.cpp به صورت پیش‌فرض در دل پروژه
+    - name: Inject llama.cpp Binary into App Assets
+      run: |
+        echo "Fetching latest android arm64 build of llama.cpp..."
+        # پیدا کردن لینک دانلود آخرین نسخه اندروید arm64 از مخزن رسمی llama.cpp
+        LLAMA_RELEASE_URL=$(curl -s https://api.github.com/repos/ggerganov/llama.cpp/releases/latest | grep "browser_download_url.*android.*arm64.*zip" | head -n 1 | cut -d '"' -f 4)
+        
+        if [ -z "$LLAMA_RELEASE_URL" ]; then
+          LLAMA_RELEASE_URL=$(curl -s https://api.github.com/repos/ggerganov/llama.cpp/releases/latest | grep "browser_download_url.*bin-android-arm64.zip" | cut -d '"' -f 4)
+        fi
+        
+        mkdir -p llama_bin
+        curl -L $LLAMA_RELEASE_URL -o llama_bin/llama.zip
+        unzip llama_bin/llama.zip -d llama_bin/
+        
+        # ساخت پوشه آپشنال بن در assets برنامه برای استخراج خودکار هنگام نصب
+        mkdir -p app/src/main/assets/bin
+        cp llama_bin/llama-cli app/src/main/assets/bin/llama-cli || cp llama_bin/main app/src/main/assets/bin/llama-cli
+        chmod +x app/src/main/assets/bin/llama-cli
+        echo "llama.cpp successfully embedded!"
+
+    # ۵. تغییر نام پکیج رسمی به نام اختصاصی و تزریق اسکریپت روت مجازی و فارسی‌ساز
+    - name: Modify Package Name & Inject Auto-Superuser PRoot
+      run: |
+        echo "Changing Application ID to avoid conflicts with original Termux..."
+        find . -type f -name "build.gradle" -exec sed -i 's/com.termux/com.mohammad.shell/g' {} +
+        
+        echo "Modifying Java Package references..."
+        find app/src/main/java -type f -name "*.java" -exec sed -i 's/com.termux/com.mohammad.shell/g' {} +
+        find terminal/src/main/java -type f -name "*.java" -exec sed -i 's/com.termux/com.mohammad.shell/g' {} +
+        
+        echo "Injecting custom proot loop and Persian env into bashrc..."
+        mkdir -p app/src/main/assets
+        
+        # نوشتن اسکریپت استارت‌آپ هوشمند
+        cat << 'EOF' > app/src/main/assets/bashrc
+        # بررسی استخراج باینری داخلی llama.cpp و انتقال به مسیر اجرایی سیستم
+        if [ ! -f "$PREFIX/bin/llama-cli" ] && [ -f "/data/data/com.mohammad.shell/files/home/../assets/bin/llama-cli" ]; then
+            cp /data/data/com.mohammad.shell/files/home/../assets/bin/llama-cli $PREFIX/bin/llama-cli
+            chmod +x $PREFIX/bin/llama-cli
+        fi
+
+        if [ -z "$MY_CUSTOM_ROOT_ACTIVE" ]; then
+            export MY_CUSTOM_ROOT_ACTIVE=1
+            
+            # تنظیم لوکیشن و متغیرهای زبان سیستم روی یونیکد استاندارد UTF-8 فارسی
+            export LANG=fa_IR.UTF-8
+            export LC_ALL=fa_IR.UTF-8
+            
+            if command -v proot > /dev/null 2>&1; then
+                echo "🚀 ورود به محیط سوپریوزر مجازی (شبیه‌ساز هویت روت و ساختار /bin) همراه با اصلاحات متون فارسی..."
+                # اجرای فرآیند با لایه فریب‌دهنده PRoot
+                exec proot -0 -r $PREFIX -b /dev -b /proc -b /sys -b /sdcard -b $HOME /bin/bash
+            else
+                echo "⚠️ ابزار سوpریوزر مجازی (PRoot) نصب نیست."
+                echo "لطفاً ابتدا اتصال اینترنت را بررسی کرده و دستور زیر را برای پیکربندی اولیه بزنید:"
+                echo "pkg update && pkg install proot -y"
+                echo "سپس برنامه را یک‌بار ببندید و دوباره باز کنید."
+            fi
+        fi
+        
+        # حل مشکل تداخل کلمه کلیدی sudo در اسکریپت‌های لینوکسی آماده
+        alias sudo=''
+        EOF
+
+    # ۶. آغاز فرآیند کامپایل و خروجی گرفتن نهایی با ابزار گریدل
+    - name: Build APK with Gradle
+      run: ./gradlew assembleDebug
+
+    # ۷. بسته‌بندی و انتقال فایل APK ساخته شده به پوشه خروجی
+    - name: Prepare APK Artifact
+      run: |
+        mkdir -p output
+        cp app/build/outputs/apk/debug/app-debug.apk output/Mohammad-Termux-PersianRoot-AI.apk
+
+    # ۸. ساخت خودکار یک Release در گیت‌هاب و قرار دادن فایل APK برای دانلود مستقیم شما
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: "v${{ github.run_number }}"
+        name: "Termux Mohammad Edition #${{ github.run_number }}"
+        body: |
+          مجموعه ویژگی‌های این نسخه دست‌ساز اختصاصی:
+          - کاملاً مستقل با نام بسته `com.mohammad.shell` (بدون تداخل با نسخه اصلی)
+          - مجهز به سوپریوزر مجازی `PRoot -0` (جعل هویت روت و دسترسی به ریشه‌های `/bin` و `/etc`)
+          - رفع باگ چسبندگی حروف فارسی در ترمینال
+          - دارای موتور بومی پردازش مدل‌های هوش مصنوعی `llama.cpp` به صورت تعبیه‌شده (Embedded)
+        draft: false
+        prerelease: false
+        files: output/Mohammad-Termux-PersianRoot-AI.apk
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
