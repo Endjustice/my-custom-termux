@@ -78,25 +78,18 @@ jobs:
            echo "✅ llama.cpp successfully embedded!"
         fi
 
-    # ۵. تغییر پکیج نیم به شکل ایمن و تزریق کدهای لودینگ روت مجازی و محیط زبان فارسی
-    - name: Modify Package Name & Inject Auto-Superuser PRoot
+    # ۵. تغییر پکیج نیم به صورت کاملاً ایزوله برای جلوگیری از خطای Package R does not exist
+    - name: Modify Package Name Safely & Inject Bashrc
       run: |
-        echo "Changing Application ID in gradle to avoid conflicts safely..."
-        # تغییر آی‌دی برنامه فقط در ساختار تعریف هویت پروژه و نه آدرس‌های URL مخزن گیت‌هاب ترموکس
-        sed -i 's/applicationId "com.termux"/applicationId "com.mohammad.shell"/g' app/build.gradle
-        sed -i 's/com.termux.app/com.mohammad.shell.app/g' app/build.gradle 2>/dev/null || true
-        
-        echo "Modifying Java/Kotlin package declarations..."
-        # تغییر پکیج‌ها فقط درون کدهای سورس جاوا
-        find app/src/main/java -type f -name "*.java" -exec sed -i 's/com.termux/com.mohammad.shell/g' {} +
-        find terminal/src/main/java -type f -name "*.java" -exec sed -i 's/com.termux/com.mohammad.shell/g' {} + 2>/dev/null || true
-        find termux-shared/src/main/java -type f -name "*.java" -exec sed -i 's/com.termux/com.mohammad.shell/g' {} + 2>/dev/null || true
+        echo "Changing Application ID globally in build.gradle files..."
+        # تغییر شناسه نهایی اپلیکیشن تا اندروید آن را به عنوان یک برنامه مجزا بشناسد و به امضا گیر ندهد
+        find . -type f -name "build.gradle" -exec sed -i 's/applicationId "com.termux"/applicationId "com.mohammad.shell"/g' {} +
         
         echo "Injecting custom proot loop and Persian env into bashrc..."
         mkdir -p app/src/main/assets
         
         cat << 'EOF' > app/src/main/assets/bashrc
-        # چک کردن و اکسترکت خودکار باینری llama.cpp از پوشه اَست‌های اندروید به باینری‌های سیستم
+        # چک کردن و اکسترکت خودکار باینری llama.cpp به مسیر اجرایی سیستم پس از نصب
         if [ ! -f "$PREFIX/bin/llama-cli" ] && [ -f "/data/data/com.mohammad.shell/files/home/../assets/bin/llama-cli" ]; then
             cp /data/data/com.mohammad.shell/files/home/../assets/bin/llama-cli $PREFIX/bin/llama-cli
             chmod +x $PREFIX/bin/llama-cli
@@ -142,7 +135,8 @@ jobs:
         name: "Termux Mohammad Edition #${{ github.run_number }}"
         body: |
           مجموعه ویژگی‌های این نسخه دست‌ساز اختصاصی شما:
-          - کاملاً مستقل با نام بسته `com.mohammad.shell` (بدون تداخل با نسخه رسمی و ارور Host URL اصلاح شده)
+          - کاملاً مستقل با نام بسته `com.mohammad.shell` در سطح سیستم‌عامل (عدم تداخل با نسخه رسمی)
+          - پچ و حل کامل خطای پکیج ساختار داخلی جاوا (Package R Fix)
           - مجهز به سوپریوزر مجازی `PRoot -0` جهت جعل هویت روت و دسترسی به آدرس‌های دایرکتوری لینوکس
           - پچ سراسری رفع باگ عدم چسبندگی و رندر اشتباه حروف فارسی در محیط شبیه‌ساز ترمینال
           - دارای هوش مصنوعی بومی `llama.cpp` تزریق شده به صورت تعبیه‌شده (Embedded) در فولدربندی پایه اپ
