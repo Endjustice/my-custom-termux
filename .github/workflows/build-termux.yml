@@ -63,26 +63,24 @@ jobs:
           chmod +x app/src/main/assets/bin/llama-cli 2>/dev/null || true
         fi
 
-    # ۵. جراحی مهندسی‌شده گریدل و مانیفست (تغییر نام بسته به صورت ریشه‌ای)
-    - name: Modify Package Identity & Enable RTL
+    # ۵. تغییر هویت پکیج به صورت کاملاً امن با ابزار بوم گریدل (بدون خراب کردن آدرس‌های دانلود)
+    - name: Safely Modify Package Identity & Enable RTL
       run: |
-        echo "Updating package identity using Gradle project properties..."
+        echo "Injecting applicationIdSuffix into app/build.gradle..."
+        # اضافه کردن پسوند به پکیج‌نیم در فایل گریدل اصلی اپلیکیشن بدون دستکاری بقیه متون
+        sed -i '/defaultConfig {/a \        applicationIdSuffix ".mohammad.shell"' app/build.gradle
         
-        # ۱. تغییر پکیج‌نیم در فایل گریدل اصلی و پیکربندی پروژه
-        find . -type f -name "build.gradle" -exec sed -i 's/com.termux/com.mohammad.shell/g' {} + 2>/dev/null || true
-        find . -type f -name "build.gradle" -exec sed -i 's/applicationId "com.termux"/applicationId "com.mohammad.shell"/g' {} + 2>/dev/null || true
-        
-        # ۲. پاک کردن sharedUserId به صورت مستقیم و بی‌رحمانه از تمام فایل‌های مانیفست قبل از ادغام گریدل
-        find . -type f -name "AndroidManifest.xml" -exec sed -i 's/android:sharedUserId="com.termux"//g' {} + 2>/dev/null || true
-        
-        # ۳. فعال‌سازی سخت‌افزاری نمایش راست‌به‌چپ در لایه مانیفست‌ها
-        find . -type f -name "AndroidManifest.xml" -exec sed -i 's/android:supportsRtl="false"/android:supportsRtl="true"/g' {} + 2>/dev/null || true
+        echo "Modifying the main AndroidManifest.xml safely..."
+        # حذف دقیق sharedUserId و فعال‌سازی RTL فقط و فقط در مانیفست اصلی ماژول app
+        sed -i 's/android:sharedUserId="com.termux"//g' app/src/main/AndroidManifest.xml 2>/dev/null || true
+        sed -i 's/android:supportsRtl="false"/android:supportsRtl="true"/g' app/src/main/AndroidManifest.xml 2>/dev/null || true
         
         echo "Injecting custom bashrc configuration..."
         mkdir -p app/src/main/assets
         cat << 'EOF' > app/src/main/assets/bashrc
-        if [ ! -f "$PREFIX/bin/llama-cli" ] && [ -f "/data/data/com.mohammad.shell/files/home/../assets/bin/llama-cli" ]; then
-            cp /data/data/com.mohammad.shell/files/home/../assets/bin/llama-cli $PREFIX/bin/llama-cli
+        # آدرس دایرکتوری جدید شما بر اساس پسوند پکیج‌نیم
+        if [ ! -f "$PREFIX/bin/llama-cli" ] && [ -f "/data/data/com.termux.mohammad.shell/files/home/../assets/bin/llama-cli" ]; then
+            cp /data/data/com.termux.mohammad.shell/files/home/../assets/bin/llama-cli $PREFIX/bin/llama-cli
             chmod +x $PREFIX/bin/llama-cli
         fi
 
@@ -102,7 +100,6 @@ jobs:
         alias sudo=''
         EOF
 
-
     # ۶. ران کردن گریدل برای کامپایل نهایی پروژه
     - name: Build APK with Gradle
       run: ./gradlew assembleDebug
@@ -111,7 +108,7 @@ jobs:
     - name: Prepare APK Artifact
       run: |
         mkdir -p output
-        find . -type f -name "*.apk" -not -path "*/outputs/logs/*" -exec cp {} output/Mohammad-Termux-PersianRoot-AI.apk \;
+        find . -type f -name "*.apk" -not -path "*/outputs/logs/*" -exec cp {} output/Termux-PersianRoot-AI.apk \;
 
     # ۸. انتشار خودکار در بخش ریلیزهای گیت‌هاب شما
     - name: Create GitHub Release
@@ -126,7 +123,7 @@ jobs:
           - پچ تزریق موتور شبیه‌ساز اتصال حروف فارسی در کلاس گرافیکی `TerminalView` جهت رندر خوانا و چسبیده کلمات.
         draft: false
         prerelease: false
-        files: output/Mohammad-Termux-PersianRoot-AI.apk
+        files: output/Termux-PersianRoot-AI.apk
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         
