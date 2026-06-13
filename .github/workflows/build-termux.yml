@@ -78,11 +78,10 @@ jobs:
            echo "✅ llama.cpp successfully embedded!"
         fi
 
-    # ۵. تغییر پکیج نیم به صورت کاملاً ایزوله برای جلوگیری از خطای Package R does not exist
+    # ۵. تغییر پکیج نیم به صورت کاملاً ایزوله برای جلوگیری از خطای تداخل امضا
     - name: Modify Package Name Safely & Inject Bashrc
       run: |
         echo "Changing Application ID globally in build.gradle files..."
-        # تغییر شناسه نهایی اپلیکیشن تا اندروید آن را به عنوان یک برنامه مجزا بشناسد و به امضا گیر ندهد
         find . -type f -name "build.gradle" -exec sed -i 's/applicationId "com.termux"/applicationId "com.mohammad.shell"/g' {} +
         
         echo "Injecting custom proot loop and Persian env into bashrc..."
@@ -121,11 +120,14 @@ jobs:
     - name: Build APK with Gradle
       run: ./gradlew assembleDebug
 
-    # ۷. جابجایی APK به پوشه خروجی پایپ‌لاین
+    # ۷. شکار هوشمند فایل APK ساخته شده و جابجایی به پوشه خروجی
     - name: Prepare APK Artifact
       run: |
         mkdir -p output
-        cp app/build/outputs/apk/debug/app-debug.apk output/Mohammad-Termux-PersianRoot-AI.apk
+        echo "Searching for the generated APK file..."
+        # استفاده از دستور find برای ردیابی خودکار هرگونه فایل apk دیباگ تولید شده در پوشه بیلدهای گریدل
+        find . -type f -name "*.apk" -not -path "*/outputs/logs/*" -exec cp {} output/Mohammad-Termux-PersianRoot-AI.apk \;
+        echo "APK successfully captured and renamed!"
 
     # ۸. انتشار خودکار در بخش ریلیزهای گیت‌هاب شما همراه با لینک مستقیم
     - name: Create GitHub Release
@@ -136,7 +138,7 @@ jobs:
         body: |
           مجموعه ویژگی‌های این نسخه دست‌ساز اختصاصی شما:
           - کاملاً مستقل با نام بسته `com.mohammad.shell` در سطح سیستم‌عامل (عدم تداخل با نسخه رسمی)
-          - پچ و حل کامل خطای پکیج ساختار داخلی جاوا (Package R Fix)
+          - سیستم ردیابی و استخراج هوشمند فایل خروجی (APK Finder Patch)
           - مجهز به سوپریوزر مجازی `PRoot -0` جهت جعل هویت روت و دسترسی به آدرس‌های دایرکتوری لینوکس
           - پچ سراسری رفع باگ عدم چسبندگی و رندر اشتباه حروف فارسی در محیط شبیه‌ساز ترمینال
           - دارای هوش مصنوعی بومی `llama.cpp` تزریق شده به صورت تعبیه‌شده (Embedded) در فولدربندی پایه اپ
