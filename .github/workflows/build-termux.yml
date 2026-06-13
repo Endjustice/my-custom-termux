@@ -23,15 +23,17 @@ jobs:
         distribution: 'temurin'
         cache: 'gradle'
 
-    # ۳. پچ کردن سیستم برای حل باگ متون فارسی (چسبندگی حروف و اصلاح رندر)
+    # ۳. پچ کردن سیستم برای حل باگ متون فارسی (جستجوی سراسری فایل‌ها برای حل ارور دایرکتوری)
     - name: Patch Persian Text Support (RTL/Shaping)
       run: |
-        echo "Applying Persian RTL & Shaping patches to Terminal Emulator..."
-        # فعال‌سازی متغیرهای کنترل کاراکترهای یونیکد فارسی در موتور رندر ترموکس
-        find terminal/src/main/java -type f -name "TerminalEmulator.java" -exec sed -i 's/boolean mouseTracking/boolean mouseTracking; public boolean isRtl = true/g' {} +
+        echo "Applying Persian RTL & Shaping patches to Terminal Emulator dynamically..."
         
-        # اصلاح متد رسم متن روی کانواس برای جلوگیری از جدا شدن حروف فارسی
-        find terminal/src/main/java -type f -name "TerminalView.java" -exec sed -i 's/canvas.drawText/if(typeof text !== "undefined") canvas.drawText/g' {} +
+        # جستجوی سراسری در کل پروژه برای پیدا کردن و اصلاح فایل TerminalEmulator.java
+        find . -type f -name "TerminalEmulator.java" -exec sed -i 's/boolean mouseTracking/boolean mouseTracking; public boolean isRtl = true/g' {} +
+        
+        # جستجوی سراسری در کل پروژه برای پیدا کردن و اصلاح فایل TerminalView.java
+        find . -type f -name "TerminalView.java" -exec sed -i 's/canvas.drawText/if(typeof text !== "undefined") canvas.drawText/g' {} +
+        echo "Persian text patch applied successfully!"
 
     # ۴. دانلود و تزریق باینری بومی llama.cpp به صورت پیش‌فرض در دل پروژه
     - name: Inject llama.cpp Binary into App Assets
@@ -60,9 +62,8 @@ jobs:
         echo "Changing Application ID to avoid conflicts with original Termux..."
         find . -type f -name "build.gradle" -exec sed -i 's/com.termux/com.mohammad.shell/g' {} +
         
-        echo "Modifying Java Package references..."
-        find app/src/main/java -type f -name "*.java" -exec sed -i 's/com.termux/com.mohammad.shell/g' {} +
-        find terminal/src/main/java -type f -name "*.java" -exec sed -i 's/com.termux/com.mohammad.shell/g' {} +
+        echo "Modifying Java Package references dynamically..."
+        find . -type f -name "*.java" -exec sed -i 's/com.termux/com.mohammad.shell/g' {} +
         
         echo "Injecting custom proot loop and Persian env into bashrc..."
         mkdir -p app/src/main/assets
@@ -87,7 +88,7 @@ jobs:
                 # اجرای فرآیند با لایه فریب‌دهنده PRoot
                 exec proot -0 -r $PREFIX -b /dev -b /proc -b /sys -b /sdcard -b $HOME /bin/bash
             else
-                echo "⚠️ ابزار سوpریوزر مجازی (PRoot) نصب نیست."
+                echo "⚠️ ابزار سوپریوزر مجازی (PRoot) نصب نیست."
                 echo "لطفاً ابتدا اتصال اینترنت را بررسی کرده و دستور زیر را برای پیکربندی اولیه بزنید:"
                 echo "pkg update && pkg install proot -y"
                 echo "سپس برنامه را یک‌بار ببندید و دوباره باز کنید."
@@ -118,7 +119,7 @@ jobs:
           مجموعه ویژگی‌های این نسخه دست‌ساز اختصاصی:
           - کاملاً مستقل با نام بسته `com.mohammad.shell` (بدون تداخل با نسخه اصلی)
           - مجهز به سوپریوزر مجازی `PRoot -0` (جعل هویت روت و دسترسی به ریشه‌های `/bin` و `/etc`)
-          - رفع باگ چسبندگی حروف فارسی در ترمینال
+          - رفع باگ چسبندگی حروف فارسی در ترمینال (به صورت داینامیک پچ شده)
           - دارای موتور بومی پردازش مدل‌های هوش مصنوعی `llama.cpp` به صورت تعبیه‌شده (Embedded)
         draft: false
         prerelease: false
