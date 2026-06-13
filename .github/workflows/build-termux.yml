@@ -63,21 +63,20 @@ jobs:
           chmod +x app/src/main/assets/bin/llama-cli 2>/dev/null || true
         fi
 
-    # ۵. جراحی عمیق مانیفست و گریدل برای تبدیل به برنامه کاملاً مستقل (حل باگ Update)
-    - name: Modify Package Identity & Enable RTL in Manifest
+    # ۵. جراحی مهندسی‌شده گریدل و مانیفست (تغییر نام بسته به صورت ریشه‌ای)
+    - name: Modify Package Identity & Enable RTL
       run: |
-        echo "Updating ApplicationID in Gradle build files..."
-        find . -type f -name "build.gradle" -exec sed -i 's/applicationId "com.termux"/applicationId "com.mohammad.shell"/g' {} +
+        echo "Updating package identity using Gradle project properties..."
         
-        echo "Fixing AndroidManifest.xml: removing sharedUserId and enabling supportsRtl..."
-        # حذف کردن sharedUserId برای رهایی از هویت ترموکس رسمی و تداخل امضا
-        find . -type f -name "AndroidManifest.xml" -exec sed -i 's/android:sharedUserId="com.termux"//g' {} +
+        # ۱. تغییر پکیج‌نیم در فایل گریدل اصلی و پیکربندی پروژه
+        find . -type f -name "build.gradle" -exec sed -i 's/com.termux/com.mohammad.shell/g' {} + 2>/dev/null || true
+        find . -type f -name "build.gradle" -exec sed -i 's/applicationId "com.termux"/applicationId "com.mohammad.shell"/g' {} + 2>/dev/null || true
         
-        # فعال کردن رسمی لایه راست‌به‌چپ اندروید در کل ساختار مانیفست اپلیکیشن
-        find . -type f -name "AndroidManifest.xml" -exec sed -i 's/android:supportsRtl="false"/android:supportsRtl="true"/g' {} +
+        # ۲. پاک کردن sharedUserId به صورت مستقیم و بی‌رحمانه از تمام فایل‌های مانیفست قبل از ادغام گریدل
+        find . -type f -name "AndroidManifest.xml" -exec sed -i 's/android:sharedUserId="com.termux"//g' {} + 2>/dev/null || true
         
-        # اصلاح پکیج‌های آدرس‌دهی در منابع مانیفست
-        find . -type f -name "AndroidManifest.xml" -exec sed -i 's/authorities="com.termux/authorities="com.mohammad.shell/g' {} +
+        # ۳. فعال‌سازی سخت‌افزاری نمایش راست‌به‌چپ در لایه مانیفست‌ها
+        find . -type f -name "AndroidManifest.xml" -exec sed -i 's/android:supportsRtl="false"/android:supportsRtl="true"/g' {} + 2>/dev/null || true
         
         echo "Injecting custom bashrc configuration..."
         mkdir -p app/src/main/assets
@@ -102,6 +101,7 @@ jobs:
         fi
         alias sudo=''
         EOF
+
 
     # ۶. ران کردن گریدل برای کامپایل نهایی پروژه
     - name: Build APK with Gradle
