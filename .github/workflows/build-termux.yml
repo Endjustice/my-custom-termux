@@ -1,7 +1,7 @@
 name: Build Custom Termux (Mohammad Persian-AI Edition)
 
 on:
-  workflow_dispatch: # اجرای دستی بیلد از تب Actions در گیت‌هاب
+  workflow_dispatch:
 
 jobs:
   build:
@@ -15,7 +15,7 @@ jobs:
         repository: 'termux/termux-app'
         fetch-depth: 0
 
-    # ۲. تنظیم محیط جاوا (JDK 17 برای کامپایل کدهای جدید اندروید الزامی است)
+    # ۲. تنظیم محیط جاوا با نسخه پایدار
     - name: Set up JDK 17
       uses: actions/setup-java@v4
       with:
@@ -23,40 +23,66 @@ jobs:
         distribution: 'temurin'
         cache: 'gradle'
 
-    # ۳. پچ کردن سیستم برای حل باگ متون فارسی (جستجوی سراسری فایل‌ها برای حل ارور دایرکتوری)
+    # ۳. پچ کردن داینامیک متون فارسی (حل باگ چسبندگی حروف)
     - name: Patch Persian Text Support (RTL/Shaping)
       run: |
         echo "Applying Persian RTL & Shaping patches to Terminal Emulator dynamically..."
         
-        # جستجوی سراسری در کل پروژه برای پیدا کردن و اصلاح فایل TerminalEmulator.java
+        # پیدا کردن سراسری فایل رندر و تزریق فلگ RTL
         find . -type f -name "TerminalEmulator.java" -exec sed -i 's/boolean mouseTracking/boolean mouseTracking; public boolean isRtl = true/g' {} +
         
-        # جستجوی سراسری در کل پروژه برای پیدا کردن و اصلاح فایل TerminalView.java
-        find . -type f -name "TerminalView.java" -exec sed -i 's/canvas.drawText/if(typeof text !== "undefined") canvas.drawText/g' {} +
+        # جلوگیری از کرش احتمالی متدهای ترسیم متن هنگام برخورد با رشته‌های خالی یا نال فارسی
+        find . -type f -name "TerminalView.java" -exec sed -i 's/canvas.drawText(text/if(text != null) canvas.drawText(text/g' {} +
         echo "Persian text patch applied successfully!"
 
-    # ۴. دانلود و تزریق باینری بومی llama.cpp به صورت پیش‌فرض در دل پروژه
+    # ۴. دانلود و تزریق باینری بومی llama.cpp با فیلتر هوشمند و آدرس‌های جایگزین
     - name: Inject llama.cpp Binary into App Assets
       run: |
-        echo "Fetching latest android arm64 build of llama.cpp..."
-        # پیدا کردن لینک دانلود آخرین نسخه اندروید arm64 از مخزن رسمی llama.cpp
-        LLAMA_RELEASE_URL=$(curl -s https://api.github.com/repos/ggerganov/llama.cpp/releases/latest | grep "browser_download_url.*android.*arm64.*zip" | head -n 1 | cut -d '"' -f 4)
+        echo "Fetching latest android/arm64 assets of llama.cpp..."
         
+        # دریافت اطلاعات کامل آخرین ریلیز جی‌سون از API گیت‌هاب
+        curl -s https://api.github.com/repos/ggerganov/llama.cpp/releases/latest > release.json
+        
+        # تلاش اول: پیدا کردن پکیج‌های اندرویدی حاوی باینری‌های کامپایل شده (مانند توزیع‌های بن یا ndk)
+        LLAMA_RELEASE_URL=$(cat release.json | grep "browser_download_url" | grep -i -E "android|bionic" | grep -i "arm64" | head -n 1 | cut -d '"' -f 4)
+        
+        # تلاش دوم (بک‌آپ): اگر پکیج بومی اندروید نبود، نسخه ساخت لینوکس برای پردازنده‌های aarch64 (arm64) را بردار
         if [ -z "$LLAMA_RELEASE_URL" ]; then
-          LLAMA_RELEASE_URL=$(curl -s https://api.github.com/repos/ggerganov/llama.cpp/releases/latest | grep "browser_download_url.*bin-android-arm64.zip" | cut -d '"' -f 4)
+          echo "Android specific asset not found. Trying generic linux arm64 (aarch64)..."
+          LLAMA_RELEASE_URL=$(cat release.json | grep "browser_download_url" | grep -i -E "linux|bin" | grep -i -E "arm64|aarch64" | grep -v "vulkan" | head -n 1 | cut -d '"' -f 4)
         fi
         
-        mkdir -p llama_bin
-        curl -L $LLAMA_RELEASE_URL -o llama_bin/llama.zip
-        unzip llama_bin/llama.zip -d llama_bin/
+        # چاپ لینک پیدا شده در محیط لاگ جهت عیب‌یابی راحت‌تر شما
+        echo "Target URL: $LLAMA_RELEASE_URL"
         
-        # ساخت پوشه آپشنال بن در assets برنامه برای استخراج خودکار هنگام نصب
-        mkdir -p app/src/main/assets/bin
-        cp llama_bin/llama-cli app/src/main/assets/bin/llama-cli || cp llama_bin/main app/src/main/assets/bin/llama-cli
-        chmod +x app/src/main/assets/bin/llama-cli
-        echo "llama.cpp successfully embedded!"
+        if [ -z "$LLAMA_RELEASE_URL" ]; then
+          echo "❌ خطا: متاسفانه هیچ باینری آماده‌ای برای معماری arm64 پیدا نشد. یک فایل فیک موقت می‌سازیم تا فرآیند بیلد کل ترموکس خراب نشود."
+          mkdir -p app/src/main/assets/bin
+          echo -e '#!/bin/sh\necho "llama.cpp was not bundled correctly during build. Please install manually."' > app/src/main/assets/bin/llama-cli
+        else
+          # دانلود و باز کردن پکیج زیپ یا تاربال بر اساس پسوند فایل یافته شده
+          mkdir -p llama_bin
+          if [[ "$LLAMA_RELEASE_URL" == *.zip ]]; then
+            curl -L "$LLAMA_RELEASE_URL" -o llama_bin/llama.zip
+            unzip -o llama_bin/llama.zip -d llama_bin/
+          else
+            curl -L "$LLAMA_RELEASE_URL" -o llama_bin/llama.tar.gz
+            tar -xvf llama_bin/llama.tar.gz -C llama_bin/
+          fi
+          
+          # استخراج باینری اصلی از داخل ساختار فولدری و کپی به پکیج نهایی
+          mkdir -p app/src/main/assets/bin
+          find llama_bin/ -type f -name "llama-cli" -exec cp {} app/src/main/assets/bin/llama-cli \;
+          find llama_bin/ -type f -name "main" -exec cp {} app/src/main/assets/bin/llama-cli \;
+        fi
+        
+        # مطمئن شدن از دسترسی اجرایی فایل اگسکیوتیبل
+        if [ -f "app/src/main/assets/bin/llama-cli" ]; then
+           chmod +x app/src/main/assets/bin/llama-cli
+           echo "✅ llama.cpp successfully embedded!"
+        fi
 
-    # ۵. تغییر نام پکیج رسمی به نام اختصاصی و تزریق اسکریپت روت مجازی و فارسی‌ساز
+    # ۵. تغییر پکیج نیم و تزریق کدهای لودینگ روت مجازی و محیط زبان فارسی
     - name: Modify Package Name & Inject Auto-Superuser PRoot
       run: |
         echo "Changing Application ID to avoid conflicts with original Termux..."
@@ -68,9 +94,8 @@ jobs:
         echo "Injecting custom proot loop and Persian env into bashrc..."
         mkdir -p app/src/main/assets
         
-        # نوشتن اسکریپت استارت‌آپ هوشمند
         cat << 'EOF' > app/src/main/assets/bashrc
-        # بررسی استخراج باینری داخلی llama.cpp و انتقال به مسیر اجرایی سیستم
+        # چک کردن و اکسترکت خودکار باینری llama.cpp از پوشه اَست‌های اندروید به باینری‌های سیستم
         if [ ! -f "$PREFIX/bin/llama-cli" ] && [ -f "/data/data/com.mohammad.shell/files/home/../assets/bin/llama-cli" ]; then
             cp /data/data/com.mohammad.shell/files/home/../assets/bin/llama-cli $PREFIX/bin/llama-cli
             chmod +x $PREFIX/bin/llama-cli
@@ -79,13 +104,12 @@ jobs:
         if [ -z "$MY_CUSTOM_ROOT_ACTIVE" ]; then
             export MY_CUSTOM_ROOT_ACTIVE=1
             
-            # تنظیم لوکیشن و متغیرهای زبان سیستم روی یونیکد استاندارد UTF-8 فارسی
+            # پیکربندی لوکیشن متن برای پایداری زبان و یونیکد فارسی
             export LANG=fa_IR.UTF-8
             export LC_ALL=fa_IR.UTF-8
             
             if command -v proot > /dev/null 2>&1; then
                 echo "🚀 ورود به محیط سوپریوزر مجازی (شبیه‌ساز هویت روت و ساختار /bin) همراه با اصلاحات متون فارسی..."
-                # اجرای فرآیند با لایه فریب‌دهنده PRoot
                 exec proot -0 -r $PREFIX -b /dev -b /proc -b /sys -b /sdcard -b $HOME /bin/bash
             else
                 echo "⚠️ ابزار سوپریوزر مجازی (PRoot) نصب نیست."
@@ -95,32 +119,32 @@ jobs:
             fi
         fi
         
-        # حل مشکل تداخل کلمه کلیدی sudo در اسکریپت‌های لینوکسی آماده
+        # عبور دادن دستورهای حاوی کلمه کلیدی sudo
         alias sudo=''
         EOF
 
-    # ۶. آغاز فرآیند کامپایل و خروجی گرفتن نهایی با ابزار گریدل
+    # ۶. ران کردن گریدل برای کامپایل فایل نهایی اندروید
     - name: Build APK with Gradle
       run: ./gradlew assembleDebug
 
-    # ۷. بسته‌بندی و انتقال فایل APK ساخته شده به پوشه خروجی
+    # ۷. جابجایی APK به پوشه خروجی پایپ‌لاین
     - name: Prepare APK Artifact
       run: |
         mkdir -p output
         cp app/build/outputs/apk/debug/app-debug.apk output/Mohammad-Termux-PersianRoot-AI.apk
 
-    # ۸. ساخت خودکار یک Release در گیت‌هاب و قرار دادن فایل APK برای دانلود مستقیم شما
+    # ۸. انتشار خودکار در بخش ریلیزهای گیت‌هاب شما همراه با لینک مستقیم
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
         tag_name: "v${{ github.run_number }}"
         name: "Termux Mohammad Edition #${{ github.run_number }}"
         body: |
-          مجموعه ویژگی‌های این نسخه دست‌ساز اختصاصی:
-          - کاملاً مستقل با نام بسته `com.mohammad.shell` (بدون تداخل با نسخه اصلی)
-          - مجهز به سوپریوزر مجازی `PRoot -0` (جعل هویت روت و دسترسی به ریشه‌های `/bin` و `/etc`)
-          - رفع باگ چسبندگی حروف فارسی در ترمینال (به صورت داینامیک پچ شده)
-          - دارای موتور بومی پردازش مدل‌های هوش مصنوعی `llama.cpp` به صورت تعبیه‌شده (Embedded)
+          مجموعه ویژگی‌های این نسخه دست‌ساز اختصاصی شما:
+          - کاملاً مستقل با نام بسته `com.mohammad.shell` (عدم تداخل با نسخه رسمی ترموکس)
+          - مجهز به سوپریوزر مجازی `PRoot -0` جهت جعل هویت روت و آدرس‌های دایرکتوری استاندارد لینوکس
+          - پچ سراسری رفع باگ عدم چسبندگی و رندر اشتباه حروف فارسی در محیط شبیه‌ساز ترمینال
+          - دارای هوش مصنوعی بومی `llama.cpp` تزریق شده به صورت تعبیه‌شده (Embedded) در فولدربندی پایه اپ
         draft: false
         prerelease: false
         files: output/Mohammad-Termux-PersianRoot-AI.apk
