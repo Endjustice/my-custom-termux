@@ -99,12 +99,13 @@ jobs:
     - name: Build Arm64-v8a Target APK with Gradle
       run: ./gradlew assembleDebug -Pandroid.injected.build.abi=arm64-v8a
 
-    # ۷. جمع‌آوری و فیلتر هوشمند فایل خروجی برای ریلیز
+    # ۷. جمع‌آوری هوشمند فایل خروجی از کل دایرکتوری کامپایل (حل خطای No such file)
     - name: Prepare Final Arm64 APK Artifact
       run: |
         mkdir -p output
-        # پیدا کردن فایل کامپایل شده مخصوص آرم ۶۴
-        find app/build/outputs/apk/debug/ -type f -name "*.apk" -exec cp {} output/termux-Arm64-Fixed.apk \;
+        # جستجوی عمومی در کل دایرکتوری ساخت برای پیدا کردن فایل کامپایل‌شده معماری آرم
+        find app/build/ -type f -name "*.apk" -exec cp {} output/termux-Arm64-Fixed.apk \;
+        echo "APK file successfully relocated to output directory."
 
     # ۸. انتشار خودکار پکیج اصلاح‌شده در گیت‌هاب شما
     - name: Create GitHub Release
@@ -122,4 +123,3 @@ jobs:
         files: output/termux-Arm64-Fixed.apk
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        
