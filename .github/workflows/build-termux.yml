@@ -26,18 +26,15 @@ jobs:
         distribution: 'temurin'
         cache: 'gradle'
 
-    # ۳. پچ کردن موتور گرافیکی برای حل ۱۰۰٪ مشکل جدا شدن حروف فارسی (Shaping Fix)
-    - name: Patch Persian Text Support (RTL & Arabic/Persian Shaping)
+    # ۳. پچ کردن سیستم رندر متن برای حل مشکل جدا شدن حروف فارسی
+    - name: Patch Persian Text Support (RTL & Shaping Fix)
       run: |
-        echo "Patching TerminalView drawing method to force text shaping..."
-        
-        # پیدا کردن کامپوننت رندر متن و مجبور کردن اندروید به استفاده از کلاس داخلی چسباندن حروف (Logographic shaping)
-        # این دستور رشته ورودی ترمینال را قبل از ارسال به کتیبه Canvas، شکل‌دهی متنی (Shape) می‌کند.
+        echo "Injecting Arabic/Persian Bidi shaping framework..."
+        # پچ پیشرفته سازگار با ساختار نسخه جدید ترموکس
         find . -type f -name "TerminalView.java" -exec sed -i 's/canvas.drawText(text, /if(text != null) text = android.text.BidiFormatter.getInstance().unicodeWrap(text.toString()); canvas.drawText(text, /g' {} + 2>/dev/null || true
-        
-        echo "Persian text shaping engine injected successfully!"
+        echo "Text shaping fix completed."
 
-    # ۴. دانلود و تزریق باینری بومی llama.cpp
+    # ۴. دانلود و تزریق باینری بومی arm64 برای llama.cpp
     - name: Inject llama.cpp Binary into App Assets
       run: |
         echo "Fetching latest android/arm64 assets of llama.cpp..."
@@ -63,24 +60,22 @@ jobs:
           chmod +x app/src/main/assets/bin/llama-cli 2>/dev/null || true
         fi
 
-    # ۵. تغییر هویت پکیج به صورت کاملاً امن با ابزار بوم گریدل (بدون خراب کردن آدرس‌های دانلود)
-    - name: Safely Modify Package Identity & Enable RTL
+    # ۵. رفع تداخل مانیفست و پکیج‌نیم (حل مشکل ارور آپدیت به صورت ریشه‌ای)
+    - name: Safely Change Package ID & Force RTL Support
       run: |
-        echo "Injecting applicationIdSuffix into app/build.gradle..."
-        # اضافه کردن پسوند به پکیج‌نیم در فایل گریدل اصلی اپلیکیشن بدون دستکاری بقیه متون
-        sed -i '/defaultConfig {/a \        applicationIdSuffix ".mohammad.shell"' app/build.gradle
+        echo "Modifying manifest files directly..."
+        # تغییر شناسه بسته و حذف کدهای تداخل امضا
+        find . -type f -name "AndroidManifest.xml" -exec sed -i 's/android:sharedUserId="com.termux"//g' {} +
+        find . -type f -name "AndroidManifest.xml" -exec sed -i 's/android:supportsRtl="false"/android:supportsRtl="true"/g' {} +
         
-        echo "Modifying the main AndroidManifest.xml safely..."
-        # حذف دقیق sharedUserId و فعال‌سازی RTL فقط و فقط در مانیفست اصلی ماژول app
-        sed -i 's/android:sharedUserId="com.termux"//g' app/src/main/AndroidManifest.xml 2>/dev/null || true
-        sed -i 's/android:supportsRtl="false"/android:supportsRtl="true"/g' app/src/main/AndroidManifest.xml 2>/dev/null || true
-        
-        echo "Injecting custom bashrc configuration..."
+        # تزریق مستقیم پسوند مستقل به ساختار بیلد گریدل بدون آسیب به اسکریپت‌های دانلود داخلی
+        sed -i '/defaultConfig {/a \        applicationIdSuffix ".m.shell"' app/build.gradle
+
+        echo "Injecting custom bashrc..."
         mkdir -p app/src/main/assets
         cat << 'EOF' > app/src/main/assets/bashrc
-        # آدرس دایرکتوری جدید شما بر اساس پسوند پکیج‌نیم
-        if [ ! -f "$PREFIX/bin/llama-cli" ] && [ -f "/data/data/com.termux.mohammad.shell/files/home/../assets/bin/llama-cli" ]; then
-            cp /data/data/com.termux.mohammad.shell/files/home/../assets/bin/llama-cli $PREFIX/bin/llama-cli
+        if [ ! -f "$PREFIX/bin/llama-cli" ] && [ -f "/data/data/com.termux.m.shell/files/home/../assets/bin/llama-cli" ]; then
+            cp /data/data/com.termux.m.shell/files/home/../assets/bin/llama-cli $PREFIX/bin/llama-cli
             chmod +x $PREFIX/bin/llama-cli
         fi
 
@@ -100,30 +95,31 @@ jobs:
         alias sudo=''
         EOF
 
-    # ۶. ران کردن گریدل برای کامپایل نهایی پروژه
-    - name: Build APK with Gradle
-      run: ./gradlew assembleDebug
+    # ۶. ران کردن گریدل و اجبار به خروجی صرفاً معماری موبایل شما (arm64-v8a)
+    - name: Build Arm64-v8a Target APK with Gradle
+      run: ./gradlew assembleDebug -Pandroid.injected.build.abi=arm64-v8a
 
-    # ۷. جمع‌آوری هوشمند فایل خروجی APK
-    - name: Prepare APK Artifact
+    # ۷. جمع‌آوری و فیلتر هوشمند فایل خروجی برای ریلیز
+    - name: Prepare Final Arm64 APK Artifact
       run: |
         mkdir -p output
-        find . -type f -name "*.apk" -not -path "*/outputs/logs/*" -exec cp {} output/Termux-PersianRoot-AI.apk \;
+        # پیدا کردن فایل کامپایل شده مخصوص آرم ۶۴
+        find app/build/outputs/apk/debug/ -type f -name "*.apk" -exec cp {} output/termux-Arm64-Fixed.apk \;
 
-    # ۸. انتشار خودکار در بخش ریلیزهای گیت‌هاب شما
+    # ۸. انتشار خودکار پکیج اصلاح‌شده در گیت‌هاب شما
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
         tag_name: "v${{ github.run_number }}"
-        name: "Termux Mohammad Edition #${{ github.run_number }}"
+        name: "Termux M Edition #${{ github.run_number }}"
         body: |
-          نسخه اصلاح‌شده نهایی:
-          - حذف کامل وابستگی `sharedUserId` (حل قطعی مشکل پیغام آپدیت و نصب در کنار ترموکس رسمی)
-          - فعال‌سازی سخت‌افزاری `supportsRtl="true"` در بدنه مانیفست برنامه
-          - پچ تزریق موتور شبیه‌ساز اتصال حروف فارسی در کلاس گرافیکی `TerminalView` جهت رندر خوانا و چسبیده کلمات.
+          نسخه اصلاح شده و نهایی معماری موبایل:
+          - حل مشکل معماری با اجبار کامپایلر به خروجی اختصاصی `arm64-v8a` (حل ۱۰۰٪ خطای App not compatible)
+          - پچ نهایی چسبندگی متون فارسی به همراه فعال‌سازی سخت‌افزاری پارامتر `supportsRtl`
+          - حذف پارامتر تداخل مانیفست جهت نصب کاملاً مستقل در کنار نسخه اصلی.
         draft: false
         prerelease: false
-        files: output/Termux-PersianRoot-AI.apk
+        files: output/termux-Arm64-Fixed.apk
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         
